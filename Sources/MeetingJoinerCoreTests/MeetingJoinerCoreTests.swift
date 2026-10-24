@@ -6,7 +6,8 @@ final class ExchangeSettingsTests: XCTestCase {
     func testValidSettingsAndEndpointIncludeConfiguredPortAndEWSPath() throws {
         let settings = ExchangeSettings(serverURL: "https://exchange.example.org", port: 8443, domain: "ACME", username: "alice", syncIntervalMinutes: 15)
         try settings.validate()
-        XCTAssertEqual(settings.endpointURL().absoluteString, "https://exchange.example.org:8443/EWS/Exchange.asmx")
+        let endpoint = try settings.endpointURL()
+        XCTAssertEqual(endpoint.absoluteString, "https://exchange.example.org:8443/EWS/Exchange.asmx")
     }
 
     func testPortAndSyncIntervalBoundsAreValidated() {
