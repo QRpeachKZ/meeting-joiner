@@ -48,6 +48,11 @@ final class ExchangeSettingsTests: XCTestCase {
         try settings.validate()
         XCTAssertEqual(settings.syncIntervalMinutes, 23)
     }
+
+    func testServerURLCannotEmbedCredentialsOrQueryData() {
+        XCTAssertThrowsError(try ExchangeSettings(serverURL: "https://user:pass@example.org").validate())
+        XCTAssertThrowsError(try ExchangeSettings(serverURL: "https://exchange.example.org?password=value").validate())
+    }
 }
 
 final class ConferenceURLRecognizerTests: XCTestCase {

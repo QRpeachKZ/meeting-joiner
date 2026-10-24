@@ -108,8 +108,7 @@ public struct GoogleCalendarProvider: MeetingCalendarProvider, Sendable {
             token = try await GoogleOAuthService(clientID: clientID, clientSecret: clientSecret, session: session).refresh(token)
             try tokenStore.saveToken(token)
         }
-        var pathCharacters = CharacterSet.urlPathAllowed
-        pathCharacters.remove(charactersIn: "/?#")
+        let pathCharacters = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~@")
         let encodedCalendarID = calendarID.addingPercentEncoding(withAllowedCharacters: pathCharacters) ?? calendarID
         var allEvents: [GoogleEvent] = []
         var nextPageToken: String?

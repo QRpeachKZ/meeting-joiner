@@ -55,7 +55,9 @@ public struct ExchangeSettings: Codable, Equatable, Sendable {
         guard (1...1_440).contains(syncIntervalMinutes) else { throw ExchangeSettingsError.invalidSyncInterval }
         guard let components = URLComponents(string: serverURL),
               let scheme = components.scheme?.lowercased(),
-              components.host?.isEmpty == false else { throw ExchangeSettingsError.invalidServerURL }
+              components.host?.isEmpty == false,
+              components.user == nil, components.password == nil,
+              components.query == nil, components.fragment == nil else { throw ExchangeSettingsError.invalidServerURL }
         switch tlsMode {
         case .systemTrust, .customCA:
             guard scheme == "https" else { throw ExchangeSettingsError.tlsModeMismatch }

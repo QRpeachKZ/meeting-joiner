@@ -2,10 +2,24 @@ import Foundation
 import MeetingJoinerCore
 import Security
 
-final class ExchangeSecurityDelegate: NSObject, URLSessionDelegate {
+final class ExchangeSecurityDelegate: NSObject, URLSessionDelegate, URLSessionTaskDelegate {
     private let settings: ExchangeSettings
 
     init(settings: ExchangeSettings) { self.settings = settings }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+                    newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
+        if settings.tlsMode != .insecureWarning {
+            guard let source = response.url, let target = request.url,
+                  source.scheme?.lowercased() == "https", target.scheme?.lowercased() == "https",
+                  source.host?.lowercased() == target.host?.lowercased(),
+                  (source.port ?? 443) == (target.port ?? 443) else {
+                completionHandler(nil)
+                return
+            }
+        }
+        completionHandler(request)
+    }
 
     func urlSession(_ session: URLSession, didReceive challenge: URLAuthenticationChallenge,
                     completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
