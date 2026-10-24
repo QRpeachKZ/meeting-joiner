@@ -19,9 +19,9 @@ final class GoogleAuthorizationFlow {
 
     func authorize(clientID: String) async throws -> (code: String, verifier: String, redirectURI: String) {
         let verifier = Self.randomURLSafeString()
-        let state = Self.randomURLSafeString()
+        let stateToken = Self.randomURLSafeString()
         codeVerifier = verifier
-        expectedState = state
+        expectedState = stateToken
         let parameters = NWParameters.tcp
         parameters.requiredLocalEndpoint = .hostPort(host: NWEndpoint.Host("127.0.0.1"), port: .any)
         let listener = try NWListener(using: parameters)
@@ -29,35 +29,37 @@ final class GoogleAuthorizationFlow {
 
         let result: Callback = try await withCheckedThrowingContinuation { continuation in
             self.continuation = continuation
-            listener.stateUpdateHandler = { [weak self] state in
-                guard let self else { return }
-                switch state {
-                case .ready:
-                    guard let port = listener.port else {
-                        self.finish(.failure(AuthorizationError.listenerUnavailable))
-                        return
+            listener.stateUpdateHandler = { [weak self] listenerState in
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    switch listenerState {
+                    case .ready:
+                        guard let port = listener.port else {
+                            self.finish(.failure(AuthorizationError.listenerUnavailable))
+                            return
+                        }
+                        let redirectURI = "http://127.0.0.1:\(port.rawValue)/callback"
+                        var components = URLComponents(string: "https://accounts.google.com/o/oauth2/v2/auth")!
+                        components.queryItems = [
+                            URLQueryItem(name: "client_id", value: clientID),
+                            URLQueryItem(name: "redirect_uri", value: redirectURI),
+                            URLQueryItem(name: "response_type", value: "code"),
+                            URLQueryItem(name: "scope", value: "https://www.googleapis.com/auth/calendar.readonly"),
+                            URLQueryItem(name: "code_challenge", value: Self.challenge(for: verifier)),
+                            URLQueryItem(name: "code_challenge_method", value: "S256"),
+                            URLQueryItem(name: "state", value: stateToken),
+                            URLQueryItem(name: "access_type", value: "offline"),
+                            URLQueryItem(name: "prompt", value: "consent")
+                        ]
+                        self.acceptConnections(listener)
+                        guard let url = components.url, NSWorkspace.shared.open(url) else {
+                            self.finish(.failure(AuthorizationError.cannotOpenBrowser))
+                            return
+                        }
+                    case .failed(let error): self.finish(.failure(error))
+                    case .cancelled: break
+                    default: break
                     }
-                    let redirectURI = "http://127.0.0.1:\(port.rawValue)/callback"
-                    var components = URLComponents(string: "https://accounts.google.com/o/oauth2/v2/auth")!
-                    components.queryItems = [
-                        URLQueryItem(name: "client_id", value: clientID),
-                        URLQueryItem(name: "redirect_uri", value: redirectURI),
-                        URLQueryItem(name: "response_type", value: "code"),
-                        URLQueryItem(name: "scope", value: "https://www.googleapis.com/auth/calendar.readonly"),
-                        URLQueryItem(name: "code_challenge", value: Self.challenge(for: verifier)),
-                        URLQueryItem(name: "code_challenge_method", value: "S256"),
-                        URLQueryItem(name: "state", value: state),
-                        URLQueryItem(name: "access_type", value: "offline"),
-                        URLQueryItem(name: "prompt", value: "consent")
-                    ]
-                    guard let url = components.url, NSWorkspace.shared.open(url) else {
-                        self.finish(.failure(AuthorizationError.cannotOpenBrowser))
-                        return
-                    }
-                    self.acceptConnections(listener)
-                case .failed(let error): self.finish(.failure(error))
-                case .cancelled: break
-                default: break
                 }
             }
             listener.start(queue: .main)
@@ -68,51 +70,59 @@ final class GoogleAuthorizationFlow {
     private func acceptConnections(_ listener: NWListener) {
         listener.newConnectionHandler = { [weak self] connection in
             connection.start(queue: .main)
-            self?.receiveRequest(on: connection, accumulated: Data())
+            Task { @MainActor [weak self] in
+                self?.receiveRequest(on: connection, accumulated: Data())
+            }
         }
     }
 
     private func receiveRequest(on connection: NWConnection, accumulated: Data) {
         connection.receive(minimumIncompleteLength: 1, maximumLength: 16_384) { [weak self] data, _, isComplete, _ in
-            guard let self, let data else { return }
-            let received = accumulated + data
-            guard let request = String(data: received, encoding: .utf8) else {
-                self.respond("Authorization was not completed. You can close this tab.", on: connection)
-                return
+            guard let data else { return }
+            Task { @MainActor [weak self] in
+                self?.processRequestData(data, on: connection, accumulated: accumulated, isComplete: isComplete)
             }
-            guard request.contains("\r\n\r\n") else {
-                if isComplete || received.count >= 16_384 {
-                    self.respond("Authorization was not completed. You can close this tab.", on: connection)
-                } else {
-                    self.receiveRequest(on: connection, accumulated: received)
-                }
-                return
-            }
-            guard let firstLine = request.components(separatedBy: "\r\n").first else { return }
-            let pieces = firstLine.split(separator: " ")
-            guard pieces.count >= 2 else { return }
-            let target = "http://127.0.0.1" + String(pieces[1])
-            guard let components = URLComponents(string: target), components.path == "/callback",
-                  let state = components.queryItems?.first(where: { $0.name == "state" })?.value,
-                  state == self.expectedState else {
-                self.respond("Authorization was not completed. You can close this tab.", on: connection)
-                return
-            }
-            if components.queryItems?.first(where: { $0.name == "error" })?.value != nil {
-                self.respond("Google authorization was cancelled. You can close this tab.", on: connection)
-                self.finish(.failure(AuthorizationError.authorizationDenied))
-                return
-            }
-            guard let code = components.queryItems?.first(where: { $0.name == "code" })?.value,
-                  let port = self.listener?.port else {
-                self.respond("Authorization was not completed. You can close this tab.", on: connection)
-                return
-            }
-            let callback = Callback(code: code, verifier: self.codeVerifier,
-                                    redirectURI: "http://127.0.0.1:" + String(port.rawValue) + "/callback")
-            self.respond("Google Calendar connected. You can close this tab and return to Meeting Joiner.", on: connection)
-            self.finish(.success(callback))
         }
+    }
+
+    private func processRequestData(_ data: Data, on connection: NWConnection, accumulated: Data, isComplete: Bool) {
+        let received = accumulated + data
+        guard let request = String(data: received, encoding: .utf8) else {
+            respond("Authorization was not completed. You can close this tab.", on: connection)
+            return
+        }
+        guard request.contains("\r\n\r\n") else {
+            if isComplete || received.count >= 16_384 {
+                respond("Authorization was not completed. You can close this tab.", on: connection)
+            } else {
+                receiveRequest(on: connection, accumulated: received)
+            }
+            return
+        }
+        guard let firstLine = request.components(separatedBy: "\r\n").first else { return }
+        let pieces = firstLine.split(separator: " ")
+        guard pieces.count >= 2 else { return }
+        let target = "http://127.0.0.1" + String(pieces[1])
+        guard let components = URLComponents(string: target), components.path == "/callback",
+              let state = components.queryItems?.first(where: { $0.name == "state" })?.value,
+              state == expectedState else {
+            respond("Authorization was not completed. You can close this tab.", on: connection)
+            return
+        }
+        if components.queryItems?.first(where: { $0.name == "error" })?.value != nil {
+            respond("Google authorization was cancelled. You can close this tab.", on: connection)
+            finish(.failure(AuthorizationError.authorizationDenied))
+            return
+        }
+        guard let code = components.queryItems?.first(where: { $0.name == "code" })?.value,
+              let port = listener?.port else {
+            respond("Authorization was not completed. You can close this tab.", on: connection)
+            return
+        }
+        let callback = Callback(code: code, verifier: codeVerifier,
+                                redirectURI: "http://127.0.0.1:\(port.rawValue)/callback")
+        respond("Google Calendar connected. You can close this tab and return to Meeting Joiner.", on: connection)
+        finish(.success(callback))
     }
 
     private func respond(_ message: String, on connection: NWConnection) {

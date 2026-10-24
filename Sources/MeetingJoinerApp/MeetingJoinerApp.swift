@@ -22,7 +22,7 @@ struct MeetingJoinerApp: App {
 }
 
 @MainActor
-final class MeetingJoinerAppModel: NSObject, ObservableObject, UNUserNotificationCenterDelegate {
+final class MeetingJoinerAppModel: NSObject, ObservableObject, @preconcurrency UNUserNotificationCenterDelegate {
     @Published var settings: ExchangeSettings
     @Published var googleClientID = ""
     @Published var googleCalendarID = "primary"
@@ -90,7 +90,7 @@ final class MeetingJoinerAppModel: NSObject, ObservableObject, UNUserNotificatio
 
     func importCA() {
         let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.certificate, .data]
+        panel.allowedContentTypes = [.data]
         panel.allowsMultipleSelection = false
         panel.message = "Import a PEM or DER CA certificate into macOS Keychain"
         guard panel.runModal() == .OK, let url = panel.url else { return }
@@ -271,7 +271,9 @@ private struct MenuContentView: View {
                 }
                 Divider()
             }
-            SettingsLink { Text("Settings…") }
+            Button("Settings…") {
+                NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+            }
             Button("Quit") { NSApplication.shared.terminate(nil) }
         }
         .padding(12)

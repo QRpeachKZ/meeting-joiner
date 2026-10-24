@@ -76,9 +76,10 @@ struct KeychainStore {
         guard status == errSecSuccess,
               let entries = result as? [[String: Any]],
               let entry = entries.first,
-              let identity = entry[kSecImportItemIdentity as String] as? SecIdentity else {
+              let identityValue = entry[kSecImportItemIdentity as String] else {
             throw KeychainError.status(status)
         }
+        let identity = identityValue as! SecIdentity
         let label = (entry[kSecImportItemLabel as String] as? String) ?? "Meeting Joiner EWS Client Certificate"
         var certificate: SecCertificate?
         guard SecIdentityCopyCertificate(identity, &certificate) == errSecSuccess else { throw KeychainError.invalidCertificate }
