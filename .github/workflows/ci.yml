@@ -1,0 +1,15 @@
+name: Swift CI
+on:
+  push:
+    branches: [main, 'reason/**']
+  pull_request:
+    branches: [main]
+jobs:
+  build-and-test:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build macOS menu bar app
+        run: ./scripts/build-app.sh
+      - name: Run unit tests
+        run: swift test
