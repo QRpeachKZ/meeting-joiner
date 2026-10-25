@@ -22,7 +22,7 @@ The app appears in the menu bar. Open **Settings…** to configure either or bot
 ## Google Calendar setup
 
 1. In Google Cloud Console, create or select a project, enable the Google Calendar API, and configure the OAuth consent screen for the intended users.
-2. Create an OAuth client with application type **Desktop app**. Add its client ID to Meeting Joiner Settings. The client secret is optional; if provided, it is stored in Keychain.
+2. Create an OAuth client with application type **Desktop app**. To avoid manual entry, put Google's downloaded `client_secret*.json` file in the project root next to `Package.swift`; Meeting Joiner discovers it when launched from the built app in `.build`. The file is ignored by Git. Alternatively, enter a client ID (and optional client secret) in Settings; credential fields are masked, and a manually entered secret is stored in Keychain.
 3. In Settings, choose **Войти через Google**. Meeting Joiner opens Google's authorization page in the system browser and receives the authorization-code response on a temporary loopback listener (`127.0.0.1`) using PKCE. Grant the read-only Calendar scope.
 4. OAuth access and refresh tokens are stored in macOS Keychain. Revoke access from your Google Account if you no longer use the app.
 
@@ -35,7 +35,7 @@ Google restricts OAuth use to registered/verified clients according to your cons
 3. Enter the password and save. It is stored in macOS Keychain, never in the project or preferences file.
 4. By default, HTTPS certificate validation uses the macOS system trust store. If your organization uses a private CA, choose **System CA plus configured CA** and import its PEM/DER certificate into Keychain. The optional PKCS#12 client identity is imported into macOS Keychain; its passphrase is used only during import.
 
-**Security limits:** certificate validation is enabled for TLS and is never disabled or replaced by accept-all behavior. No-TLS mode is an explicit, visibly warned option, removes any saved Exchange password, and sends no password or Authorization header; it may therefore fail against Exchange. The Google OAuth client secret, access/refresh tokens, Exchange password, CA certificate, and imported private-key identity are kept in Keychain. Nonsecret provider settings are stored in the user's macOS preferences. No credentials are written to source files.
+**Security limits:** certificate validation is enabled for TLS and is never disabled or replaced by accept-all behavior. No-TLS mode is an explicit, visibly warned option, removes any saved Exchange password, and sends no password or Authorization header; it may therefore fail against Exchange. Access/refresh tokens, manually entered Google OAuth client secrets, Exchange passwords, CA certificates, and imported private-key identities are kept in Keychain. A locally discovered OAuth JSON file remains in the project root and is ignored by Git; its client ID and secret are not displayed in Settings or emitted in app status/log messages. Nonsecret provider settings are stored in the user's macOS preferences. No credentials are written to tracked source files.
 
 ## Provider and reminder boundaries
 
