@@ -23,7 +23,7 @@ The app appears in the menu bar. Open **Settings…** to configure either or bot
 
 1. In Google Cloud Console, create or select a project, enable the Google Calendar API, and configure the OAuth consent screen for the intended users.
 2. Create an OAuth client with application type **Desktop app**. Add its client ID to Meeting Joiner Settings. The client secret is optional; if provided, it is stored in Keychain.
-3. Choose **Connect Google Calendar…**. Meeting Joiner opens Google's authorization page in the system browser and receives the authorization-code response on a temporary loopback listener (`127.0.0.1`) using PKCE. Grant the read-only Calendar scope.
+3. In Settings, choose **Войти через Google**. Meeting Joiner opens Google's authorization page in the system browser and receives the authorization-code response on a temporary loopback listener (`127.0.0.1`) using PKCE. Grant the read-only Calendar scope.
 4. OAuth access and refresh tokens are stored in macOS Keychain. Revoke access from your Google Account if you no longer use the app.
 
 Google restricts OAuth use to registered/verified clients according to your consent-screen audience and publishing status. This project does not bundle a developer's OAuth client ID or secret.
