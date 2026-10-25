@@ -286,10 +286,16 @@ private struct SettingsView: View {
     var body: some View {
         Form {
             Section("Google Calendar") {
-                TextField("OAuth desktop client ID", text: $model.googleClientID)
+                Text("Sign in to let Meeting Joiner read your Google Calendar.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                TextField("OAuth desktop client ID (required)", text: $model.googleClientID)
+                Text("A Google OAuth Desktop app client ID is required. Meeting Joiner does not bundle one.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 TextField("Calendar ID", text: $model.googleCalendarID)
                 SecureField("OAuth client secret (optional)", text: $model.googleClientSecretDraft)
-                Button("Connect Google Calendar…") { model.connectGoogle() }
+                Button("Войти через Google") { model.connectGoogle() }
             }
             Section("On-prem Exchange (EWS)") {
                 TextField("Server URL", text: $model.settings.serverURL, prompt: Text("https://exchange.example.org"))
