@@ -67,15 +67,20 @@ final class MeetingJoinerAppModel: NSObject, ObservableObject, @preconcurrency U
 
     var hasLocalGoogleOAuthConfiguration: Bool { localGoogleOAuthConfiguration != nil }
 
+    var isUsingLocalGoogleOAuthConfiguration: Bool {
+        hasLocalGoogleOAuthConfiguration && googleClientID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     private var effectiveGoogleClientID: String {
-        let override = googleClientID.trimmingCharacters(in: .whitespacesAndNewlines)
-        return override.isEmpty ? (localGoogleOAuthConfiguration?.clientID ?? "") : override
+        if isUsingLocalGoogleOAuthConfiguration {
+            return localGoogleOAuthConfiguration?.clientID ?? ""
+        }
+        return googleClientID.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func effectiveGoogleClientSecret() -> String? {
-        if googleClientID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-           let localGoogleOAuthConfiguration {
-            return localGoogleOAuthConfiguration.clientSecret
+        if isUsingLocalGoogleOAuthConfiguration {
+            return localGoogleOAuthConfiguration?.clientSecret
         }
         return try? KeychainStore.loadSecret(account: "google.client-secret")
     }
@@ -321,8 +326,12 @@ private struct SettingsView: View {
                 Text("Sign in to let Meeting Joiner read your Google Calendar.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                if model.hasLocalGoogleOAuthConfiguration {
-                    Text("A local Google Desktop OAuth configuration was found. Leave the ID override blank to use it; credential values are not displayed.")
+                if model.isUsingLocalGoogleOAuthConfiguration {
+                    Text("Using the local Google Desktop OAuth client ID and secret. Credential values are not displayed.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else if model.hasLocalGoogleOAuthConfiguration {
+                    Text("A local configuration was found. Clear the client ID override to use it; credential values are not displayed.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 } else {
@@ -332,7 +341,13 @@ private struct SettingsView: View {
                 }
                 SecureField("OAuth desktop client ID override (optional)", text: $model.googleClientID)
                 TextField("Calendar ID", text: $model.googleCalendarID)
-                SecureField("OAuth client secret override (optional)", text: $model.googleClientSecretDraft)
+                if model.isUsingLocalGoogleOAuthConfiguration {
+                    Text("The client secret is supplied by the local file and remains hidden.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    SecureField("OAuth client secret override (optional)", text: $model.googleClientSecretDraft)
+                }
                 Button("Войти через Google") { model.connectGoogle() }
             }
             Section("On-prem Exchange (EWS)") {
