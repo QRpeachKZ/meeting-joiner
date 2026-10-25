@@ -2,6 +2,82 @@ import Foundation
 import XCTest
 @testable import MeetingJoinerCore
 
+final class GoogleOAuthDesktopClientConfigurationTests: XCTestCase {
+    private let validConfiguration = Data(#"{"installed":{"client_id":"12345-synthetic.apps.googleusercontent.com","client_secret":"synthetic-test-secret"}}"#.utf8)
+
+    func testParsesGoogleDesktopClientConfiguration() throws {
+        let configuration = try XCTUnwrap(GoogleOAuthDesktopClientConfiguration(data: validConfiguration))
+        XCTAssertEqual(configuration.clientID, "12345-synthetic.apps.googleusercontent.com")
+        XCTAssertEqual(configuration.clientSecret, "synthetic-test-secret")
+        let renderedConfiguration = configuration.description + configuration.debugDescription
+        XCTAssertFalse(renderedConfiguration.contains(configuration.clientID))
+        XCTAssertFalse(renderedConfiguration.contains(configuration.clientSecret))
+    }
+
+    func testRejectsMalformedOrNonDesktopConfigurations() {
+        XCTAssertNil(GoogleOAuthDesktopClientConfiguration(data: Data("not json".utf8)))
+        XCTAssertNil(GoogleOAuthDesktopClientConfiguration(data: Data(#"{"web":{"client_id":"12345-synthetic.apps.googleusercontent.com","client_secret":"synthetic-test-secret"}}"#.utf8)))
+        XCTAssertNil(GoogleOAuthDesktopClientConfiguration(data: Data(#"{"installed":{"client_id":"not-an-oauth-client","client_secret":"synthetic-test-secret"}}"#.utf8)))
+        XCTAssertNil(GoogleOAuthDesktopClientConfiguration(data: Data(#"{"installed":{"client_id":"12345-synthetic.apps.googleusercontent.com"}}"#.utf8)))
+    }
+
+    func testDiscoversValidMatchingFileAtProjectRootAndSkipsMalformedCandidate() throws {
+        let project = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: project) }
+        try Data("not json".utf8).write(to: project.appendingPathComponent("client_secret-a.json"))
+        try validConfiguration.write(to: project.appendingPathComponent("client_secret-b.apps.googleusercontent.com.json"))
+
+        let configuration = try XCTUnwrap(GoogleOAuthDesktopClientConfiguration.discover(inProjectDirectory: project))
+        XCTAssertEqual(configuration.clientID, "12345-synthetic.apps.googleusercontent.com")
+        XCTAssertEqual(configuration.clientSecret, "synthetic-test-secret")
+    }
+
+    func testDoesNotSearchNestedDirectoriesOrUnrelatedFiles() throws {
+        let project = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: project) }
+        let nested = project.appendingPathComponent("config", isDirectory: true)
+        try FileManager.default.createDirectory(at: nested, withIntermediateDirectories: true)
+        try validConfiguration.write(to: nested.appendingPathComponent("client_secret-nested.json"))
+        try validConfiguration.write(to: project.appendingPathComponent("other.json"))
+
+        XCTAssertNil(GoogleOAuthDesktopClientConfiguration.discover(inProjectDirectory: project))
+    }
+
+    func testFindsProjectRootFromAppBundleAncestors() throws {
+        let project = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: project) }
+        try Data().write(to: project.appendingPathComponent("Package.swift"))
+        let appDirectory = project.appendingPathComponent(".build/MeetingJoinerApp.app/Contents/MacOS", isDirectory: true)
+        try FileManager.default.createDirectory(at: appDirectory, withIntermediateDirectories: true)
+
+        XCTAssertEqual(
+            GoogleOAuthDesktopClientConfiguration.projectRoot(containingPackageFrom: [appDirectory]),
+            project
+        )
+    }
+
+    func testProjectRootSearchStopsAtFilesystemRoot() {
+        XCTAssertNil(
+            GoogleOAuthDesktopClientConfiguration.projectRoot(
+                containingPackageFrom: [URL(fileURLWithPath: "/", isDirectory: true)]
+            )
+        )
+    }
+
+    func testMissingProjectMarkerAndMissingConfigurationFallBackToManualSetup() throws {
+        let unrelatedDirectory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: unrelatedDirectory) }
+        XCTAssertNil(GoogleOAuthDesktopClientConfiguration.projectRoot(containingPackageFrom: [unrelatedDirectory]))
+        XCTAssertNil(GoogleOAuthDesktopClientConfiguration.discover(inProjectDirectory: unrelatedDirectory))
+    }
+
+    private func makeTemporaryDirectory() throws -> URL {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        return directory
+    }
+}
+
 final class ExchangeSettingsTests: XCTestCase {
     func testValidSettingsAndEndpointIncludeConfiguredPortAndEWSPath() throws {
         let settings = ExchangeSettings(serverURL: "https://exchange.example.org", port: 8443, domain: "ACME", username: "alice", syncIntervalMinutes: 15)

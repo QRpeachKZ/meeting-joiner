@@ -35,9 +35,11 @@ final class MeetingJoinerAppModel: NSObject, ObservableObject, @preconcurrency U
     private let defaults = UserDefaults.standard
     private let notificationCenter = UNUserNotificationCenter.current()
     private let reminderCoordinator: ReminderCoordinator
+    private let localGoogleOAuthConfiguration: GoogleOAuthDesktopClientConfiguration?
     private var timer: Timer?
 
     override init() {
+        localGoogleOAuthConfiguration = Self.discoverLocalGoogleOAuthConfiguration()
         if let data = UserDefaults.standard.data(forKey: "exchange-settings"),
            let stored = try? JSONDecoder().decode(ExchangeSettings.self, from: data) {
             settings = stored
@@ -62,6 +64,37 @@ final class MeetingJoinerAppModel: NSObject, ObservableObject, @preconcurrency U
     }
 
     static let reminderCategory = "MEETING_JOINER_REMINDER"
+
+    var hasLocalGoogleOAuthConfiguration: Bool { localGoogleOAuthConfiguration != nil }
+
+    var isUsingLocalGoogleOAuthConfiguration: Bool {
+        hasLocalGoogleOAuthConfiguration && googleClientID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var effectiveGoogleClientID: String {
+        if isUsingLocalGoogleOAuthConfiguration {
+            return localGoogleOAuthConfiguration?.clientID ?? ""
+        }
+        return googleClientID.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func effectiveGoogleClientSecret() -> String? {
+        if isUsingLocalGoogleOAuthConfiguration {
+            return localGoogleOAuthConfiguration?.clientSecret
+        }
+        return try? KeychainStore.loadSecret(account: "google.client-secret")
+    }
+
+    private static func discoverLocalGoogleOAuthConfiguration() -> GoogleOAuthDesktopClientConfiguration? {
+        let appDirectories = [
+            Bundle.main.bundleURL,
+            Bundle.main.executableURL?.deletingLastPathComponent()
+        ].compactMap { $0 }
+        guard let projectRoot = GoogleOAuthDesktopClientConfiguration.projectRoot(
+            containingPackageFrom: appDirectories
+        ) else { return nil }
+        return GoogleOAuthDesktopClientConfiguration.discover(inProjectDirectory: projectRoot)
+    }
 
     func saveSettings() {
         if let data = try? JSONEncoder().encode(settings) { defaults.set(data, forKey: "exchange-settings") }
@@ -123,14 +156,17 @@ final class MeetingJoinerAppModel: NSObject, ObservableObject, @preconcurrency U
     }
 
     func connectGoogle() {
-        guard !googleClientID.isEmpty else { status = "Enter a Google OAuth desktop client ID first"; return }
+        let clientID = effectiveGoogleClientID
+        guard !clientID.isEmpty else {
+            status = "Add a valid local Google Desktop OAuth file or enter a client ID in Settings"
+            return
+        }
         saveSettings()
         status = "Waiting for Google authorization…"
         Task {
             do {
-                let callback = try await GoogleAuthorizationFlow().authorize(clientID: googleClientID)
-                let secret = try KeychainStore.loadSecret(account: "google.client-secret")
-                let service = GoogleOAuthService(clientID: googleClientID, clientSecret: secret)
+                let callback = try await GoogleAuthorizationFlow().authorize(clientID: clientID)
+                let service = GoogleOAuthService(clientID: clientID, clientSecret: effectiveGoogleClientSecret())
                 let token = try await service.exchangeAuthorizationCode(callback.code, verifier: callback.verifier, redirectURI: callback.redirectURI)
                 try KeychainGoogleTokenStore().saveToken(token)
                 status = "Google Calendar connected"
@@ -142,9 +178,10 @@ final class MeetingJoinerAppModel: NSObject, ObservableObject, @preconcurrency U
     func syncNow() async {
         saveSettingsIfNeeded()
         var providers: [any MeetingCalendarProvider] = []
-        if !googleClientID.isEmpty, (try? KeychainGoogleTokenStore().loadToken()) != nil {
-            providers.append(GoogleCalendarProvider(clientID: googleClientID,
-                                                    clientSecret: try? KeychainStore.loadSecret(account: "google.client-secret"),
+        let clientID = effectiveGoogleClientID
+        if !clientID.isEmpty, (try? KeychainGoogleTokenStore().loadToken()) != nil {
+            providers.append(GoogleCalendarProvider(clientID: clientID,
+                                                    clientSecret: effectiveGoogleClientSecret(),
                                                     calendarID: googleCalendarID,
                                                     tokenStore: KeychainGoogleTokenStore()))
         }
@@ -289,12 +326,28 @@ private struct SettingsView: View {
                 Text("Sign in to let Meeting Joiner read your Google Calendar.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                TextField("OAuth desktop client ID (required)", text: $model.googleClientID)
-                Text("A Google OAuth Desktop app client ID is required. Meeting Joiner does not bundle one.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                if model.isUsingLocalGoogleOAuthConfiguration {
+                    Text("Using the local Google Desktop OAuth client ID and secret. Credential values are not displayed.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else if model.hasLocalGoogleOAuthConfiguration {
+                    Text("A local configuration was found. Clear the client ID override to use it; credential values are not displayed.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("No valid local Google Desktop OAuth configuration was found. Enter a client ID below or add a client_secret*.json file next to Package.swift.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                SecureField("OAuth desktop client ID override (optional)", text: $model.googleClientID)
                 TextField("Calendar ID", text: $model.googleCalendarID)
-                SecureField("OAuth client secret (optional)", text: $model.googleClientSecretDraft)
+                if model.isUsingLocalGoogleOAuthConfiguration {
+                    Text("The client secret is supplied by the local file and remains hidden.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    SecureField("OAuth client secret override (optional)", text: $model.googleClientSecretDraft)
+                }
                 Button("Войти через Google") { model.connectGoogle() }
             }
             Section("On-prem Exchange (EWS)") {
