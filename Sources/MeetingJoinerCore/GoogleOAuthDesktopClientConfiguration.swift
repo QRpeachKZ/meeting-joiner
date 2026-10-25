@@ -59,8 +59,10 @@ public struct GoogleOAuthDesktopClientConfiguration: Equatable, Sendable, Custom
                 if fileManager.fileExists(atPath: candidate.appendingPathComponent("Package.swift").path) {
                     return candidate
                 }
-                let parent = candidate.deletingLastPathComponent()
-                guard parent.path != candidate.path else { break }
+                let components = candidate.pathComponents
+                guard components.count > 1 else { break }
+                let parent = candidate.deletingLastPathComponent().standardizedFileURL
+                guard parent.pathComponents.count < components.count else { break }
                 candidate = parent
             }
         }

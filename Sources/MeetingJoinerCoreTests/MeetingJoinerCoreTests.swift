@@ -56,6 +56,14 @@ final class GoogleOAuthDesktopClientConfigurationTests: XCTestCase {
         )
     }
 
+    func testProjectRootSearchStopsAtFilesystemRoot() {
+        XCTAssertNil(
+            GoogleOAuthDesktopClientConfiguration.projectRoot(
+                containingPackageFrom: [URL(fileURLWithPath: "/", isDirectory: true)]
+            )
+        )
+    }
+
     func testMissingProjectMarkerAndMissingConfigurationFallBackToManualSetup() throws {
         let unrelatedDirectory = try makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: unrelatedDirectory) }
