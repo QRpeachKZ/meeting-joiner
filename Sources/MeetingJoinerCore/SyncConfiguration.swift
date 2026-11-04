@@ -44,6 +44,26 @@ public struct ExchangeSettings: Codable, Equatable, Sendable {
         self.clientIdentityLabel = clientIdentityLabel
     }
 
+    public var login: String {
+        domain.isEmpty ? username : "\(domain)\\\(username)"
+    }
+
+    public mutating func setLogin(_ raw: String) throws {
+        let value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if value.isEmpty {
+            domain = ""
+            username = ""
+            return
+        }
+        let parts = value.components(separatedBy: "\\")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+        guard parts.count == 2, !parts[0].isEmpty, !parts[1].isEmpty else {
+            throw ExchangeSettingsError.invalidLogin
+        }
+        domain = parts[0]
+        username = parts[1]
+    }
+
     public var securityWarning: String? {
         tlsMode == .insecureWarning
             ? "Warning: EWS traffic is unencrypted. Saving this mode removes the saved password and disables password authentication; Exchange may reject this connection."
@@ -82,8 +102,27 @@ public struct ExchangeSettings: Codable, Equatable, Sendable {
 
     public func authorizationHeader(password: String) -> String? {
         guard tlsMode != .insecureWarning, !username.isEmpty, !password.isEmpty else { return nil }
-        let login = domain.isEmpty ? username : "\(domain)\\\(username)"
         return "Basic " + Data("\(login):\(password)".utf8).base64EncodedString()
+    }
+
+    public func allowsRedirect(from source: URL, to target: URL) -> Bool {
+        guard let origin = try? endpointURL() else { return false }
+        return Self.sameOrigin(source, origin) && Self.sameOrigin(target, origin)
+    }
+
+    public func allowsClientIdentity(host: String, port: Int, scheme: String?) -> Bool {
+        guard tlsMode != .insecureWarning, let origin = try? endpointURL(),
+              origin.scheme?.lowercased() == "https", scheme?.lowercased() == "https" else { return false }
+        return host.lowercased() == origin.host?.lowercased() && port == (origin.port ?? 443)
+    }
+
+    private static func sameOrigin(_ url: URL, _ origin: URL) -> Bool {
+        let scheme = origin.scheme?.lowercased()
+        let defaultPort = scheme == "https" ? 443 : 80
+        return url.user == nil && url.password == nil
+            && url.scheme?.lowercased() == scheme
+            && url.host?.lowercased() == origin.host?.lowercased()
+            && (url.port ?? defaultPort) == (origin.port ?? defaultPort)
     }
 }
 
@@ -93,9 +132,11 @@ public enum ExchangeSettingsError: Error, LocalizedError {
     case invalidServerURL
     case tlsModeMismatch
     case missingCustomCA
+    case invalidLogin
 
     public var errorDescription: String? {
         switch self {
+        case .invalidLogin: return "Введите логин в формате DOMAIN\\USERNAME (например, MOSCOW\\U_M1ABC) или оставьте поле пустым, чтобы отключить Exchange."
         case .invalidPort: return "Port must be between 1 and 65535."
         case .invalidSyncInterval: return "Sync interval must be between 1 and 1440 minutes."
         case .invalidServerURL: return "Enter a valid Exchange server URL."

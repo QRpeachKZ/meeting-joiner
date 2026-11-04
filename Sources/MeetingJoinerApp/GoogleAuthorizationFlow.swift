@@ -51,7 +51,6 @@ final class GoogleAuthorizationFlow {
                             URLQueryItem(name: "access_type", value: "offline"),
                             URLQueryItem(name: "prompt", value: "consent")
                         ]
-                        self.acceptConnections(listener)
                         guard let url = components.url, NSWorkspace.shared.open(url) else {
                             self.finish(.failure(AuthorizationError.cannotOpenBrowser))
                             return
@@ -62,6 +61,7 @@ final class GoogleAuthorizationFlow {
                     }
                 }
             }
+            acceptConnections(listener)
             listener.start(queue: .main)
         }
         return (result.code, result.verifier, result.redirectURI)

@@ -9,14 +9,10 @@ final class ExchangeSecurityDelegate: NSObject, URLSessionDelegate, URLSessionTa
 
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
                     newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
-        if settings.tlsMode != .insecureWarning {
-            guard let source = response.url, let target = request.url,
-                  source.scheme?.lowercased() == "https", target.scheme?.lowercased() == "https",
-                  source.host?.lowercased() == target.host?.lowercased(),
-                  (source.port ?? 443) == (target.port ?? 443) else {
-                completionHandler(nil)
-                return
-            }
+        guard let source = response.url, let target = request.url,
+              settings.allowsRedirect(from: source, to: target) else {
+            completionHandler(nil)
+            return
         }
         completionHandler(request)
     }
@@ -43,11 +39,16 @@ final class ExchangeSecurityDelegate: NSObject, URLSessionDelegate, URLSessionTa
                               trusted ? URLCredential(trust: trust) : nil)
             return
         }
-        if space.authenticationMethod == NSURLAuthenticationMethodClientCertificate,
-           let label = settings.clientIdentityLabel,
-           let identity = KeychainStore.identity(label: label) {
-            completionHandler(.useCredential, URLCredential(identity: identity, certificates: nil, persistence: .forSession))
-            return
+        if space.authenticationMethod == NSURLAuthenticationMethodClientCertificate {
+            guard settings.allowsClientIdentity(host: space.host, port: space.port, scheme: space.protocol) else {
+                completionHandler(.cancelAuthenticationChallenge, nil)
+                return
+            }
+            if let label = settings.clientIdentityLabel,
+               let identity = KeychainStore.identity(label: label) {
+                completionHandler(.useCredential, URLCredential(identity: identity, certificates: nil, persistence: .forSession))
+                return
+            }
         }
         completionHandler(.performDefaultHandling, nil)
     }

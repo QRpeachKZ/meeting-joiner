@@ -1,4 +1,4 @@
 .build/
 .swiftpm/
-/client_secret*.json
+client_secret*.json
 .DS_Store

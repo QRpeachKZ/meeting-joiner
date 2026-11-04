@@ -3,7 +3,7 @@ import Foundation
 import FoundationNetworking
 #endif
 
-public struct GoogleOAuthToken: Codable, Sendable {
+public struct GoogleOAuthToken: Codable, Equatable, Sendable {
     public var accessToken: String
     public var refreshToken: String?
     public var expiresAt: Date
@@ -18,6 +18,7 @@ public struct GoogleOAuthToken: Codable, Sendable {
 public protocol GoogleTokenStoring: Sendable {
     func loadToken() throws -> GoogleOAuthToken?
     func saveToken(_ token: GoogleOAuthToken) throws
+    func replaceToken(_ token: GoogleOAuthToken, ifCurrent current: GoogleOAuthToken) throws -> Bool
 }
 
 public struct GoogleOAuthService: Sendable {
@@ -103,10 +104,15 @@ public struct GoogleCalendarProvider: MeetingCalendarProvider, Sendable {
     }
 
     public func fetchMeetings(from start: Date, to end: Date) async throws -> [Meeting] {
+        try Task.checkCancellation()
         guard var token = try tokenStore.loadToken() else { throw CalendarProviderError.missingRefreshToken }
         if token.expiresAt <= Date().addingTimeInterval(60) {
-            token = try await GoogleOAuthService(clientID: clientID, clientSecret: clientSecret, session: session).refresh(token)
-            try tokenStore.saveToken(token)
+            let original = token
+            token = try await GoogleOAuthService(clientID: clientID, clientSecret: clientSecret, session: session).refresh(original)
+            try Task.checkCancellation()
+            guard try tokenStore.replaceToken(token, ifCurrent: original) else {
+                throw CalendarProviderError.api("Google authorization changed during sync; discarded stale results.")
+            }
         }
         let pathCharacters = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~@")
         let encodedCalendarID = calendarID.addingPercentEncoding(withAllowedCharacters: pathCharacters) ?? calendarID
@@ -114,6 +120,7 @@ public struct GoogleCalendarProvider: MeetingCalendarProvider, Sendable {
         var nextPageToken: String?
         var seenPageTokens = Set<String>()
         repeat {
+            try validateCurrentToken(token)
             var components = URLComponents(string: "https://www.googleapis.com/calendar/v3/calendars/\(encodedCalendarID)/events")!
             components.queryItems = [URLQueryItem(name: "timeMin", value: ISO8601DateFormatter().string(from: start)),
                                      URLQueryItem(name: "timeMax", value: ISO8601DateFormatter().string(from: end)),
@@ -123,6 +130,7 @@ public struct GoogleCalendarProvider: MeetingCalendarProvider, Sendable {
             var request = URLRequest(url: components.url!)
             request.setValue("Bearer \(token.accessToken)", forHTTPHeaderField: "Authorization")
             let (data, response) = try await session.data(for: request)
+            try validateCurrentToken(token)
             guard let http = response as? HTTPURLResponse else { throw CalendarProviderError.invalidResponse }
             guard (200..<300).contains(http.statusCode) else { throw CalendarProviderError.httpStatus(http.statusCode) }
             let page = try JSONDecoder().decode(EventsResponse.self, from: data)
@@ -132,11 +140,20 @@ public struct GoogleCalendarProvider: MeetingCalendarProvider, Sendable {
                 throw CalendarProviderError.invalidResponse
             }
         } while nextPageToken != nil
-        return allEvents.compactMap { event in
+        let meetings = allEvents.compactMap { event -> Meeting? in
             guard let startDate = event.start.dateValue, let endDate = event.end.dateValue, let id = event.id else { return nil }
             let link = event.hangoutLink.flatMap(ConferenceURLRecognizer.firstURL(in:))
                 ?? ConferenceURLRecognizer.firstURL(in: [event.location, event.description].compactMap { $0 }.joined(separator: "\n"))
             return Meeting(id: "google:\(id)", title: event.summary ?? "Untitled meeting", start: startDate, end: endDate, conferenceURL: link)
+        }
+        try validateCurrentToken(token)
+        return meetings
+    }
+
+    private func validateCurrentToken(_ token: GoogleOAuthToken) throws {
+        try Task.checkCancellation()
+        guard try tokenStore.loadToken() == token else {
+            throw CalendarProviderError.api("Google authorization changed during sync; discarded stale results.")
         }
     }
 

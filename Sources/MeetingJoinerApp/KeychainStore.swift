@@ -113,13 +113,26 @@ struct KeychainStore {
 }
 
 struct KeychainGoogleTokenStore: GoogleTokenStoring {
-    private let account = "google.oauth-token"
+    private static let cache = CachedGoogleTokenStore(
+        load: {
+            guard let data = try KeychainStore.load(account: "google.oauth-token") else { return nil }
+            return try JSONDecoder().decode(GoogleOAuthToken.self, from: data)
+        },
+        save: { token in
+            try KeychainStore.save(JSONEncoder().encode(token), account: "google.oauth-token")
+        }
+    )
+
     func loadToken() throws -> GoogleOAuthToken? {
-        guard let data = try KeychainStore.load(account: account) else { return nil }
-        return try JSONDecoder().decode(GoogleOAuthToken.self, from: data)
+        try Self.cache.loadToken()
     }
+
     func saveToken(_ token: GoogleOAuthToken) throws {
-        try KeychainStore.save(JSONEncoder().encode(token), account: account)
+        try Self.cache.saveToken(token)
+    }
+
+    func replaceToken(_ token: GoogleOAuthToken, ifCurrent current: GoogleOAuthToken) throws -> Bool {
+        try Self.cache.replaceToken(token, ifCurrent: current)
     }
 }
 
