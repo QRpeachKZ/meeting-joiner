@@ -295,21 +295,44 @@ private struct MenuContentView: View {
         Array(upcomingMeetings.prefix(8))
     }
 
-    private var statusIcon: String {
-        let status = model.status.lowercased()
-        if status.contains("fail") || status.contains("error") { return "exclamationmark.triangle.fill" }
-        if status.contains("connected") || status.contains("synced") || status.contains("saved") { return "checkmark.circle.fill" }
-        if status.contains("waiting") || status.contains("authorization") { return "person.crop.circle.badge.clock" }
-        return "info.circle"
+    private enum StatusPresentation {
+        case failure, warning, success, progress, info
+
+        var icon: String {
+            switch self {
+            case .failure: return "exclamationmark.triangle.fill"
+            case .warning: return "exclamationmark.triangle"
+            case .success: return "checkmark.circle.fill"
+            case .progress: return "person.crop.circle.badge.clock"
+            case .info: return "info.circle"
+            }
+        }
+
+        var tint: Color {
+            switch self {
+            case .failure: return .red
+            case .warning, .progress: return .orange
+            case .success: return .green
+            case .info: return Color(nsColor: .secondaryLabelColor)
+            }
+        }
     }
 
-    private var statusTint: Color {
+    private var statusPresentation: StatusPresentation {
         let status = model.status.lowercased()
-        if status.contains("fail") || status.contains("error") { return .red }
-        if status.contains("connected") || status.contains("synced") || status.contains("saved") { return .green }
-        if status.contains("waiting") || status.contains("authorization") { return .orange }
-        return Color(nsColor: .secondaryLabelColor)
+        if status.contains("partially synced") { return .warning }
+        if status.contains("fail") || status.contains("error") { return .failure }
+        if status.contains("configure a calendar provider") || status.contains("add a valid local google") { return .warning }
+        if status.isEmpty || status == "not connected" { return .info }
+        if status == "settings saved" || status.hasPrefix("synced ") || status.hasPrefix("google calendar connected") || status.hasPrefix("client certificate imported") {
+            return .success
+        }
+        if status.contains("waiting") || status.contains("authorization") { return .progress }
+        return .info
     }
+
+    private var statusIcon: String { statusPresentation.icon }
+    private var statusTint: Color { statusPresentation.tint }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
