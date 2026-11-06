@@ -286,71 +286,248 @@ private struct WorkspaceConferenceOpener: ConferenceURLOpening {
 
 private struct MenuContentView: View {
     @ObservedObject var model: MeetingJoinerAppModel
+
+    private var upcomingMeetings: [Meeting] {
+        model.meetings.filter { $0.end > .now }
+    }
+
+    private var statusIcon: String {
+        let status = model.status.lowercased()
+        if status.contains("fail") || status.contains("error") { return "exclamationmark.triangle.fill" }
+        if status.contains("connected") || status.contains("synced") || status.contains("saved") { return "checkmark.circle.fill" }
+        if status.contains("waiting") || status.contains("authorization") { return "person.crop.circle.badge.clock" }
+        return "info.circle"
+    }
+
+    private var statusTint: Color {
+        let status = model.status.lowercased()
+        if status.contains("fail") || status.contains("error") { return .red }
+        if status.contains("connected") || status.contains("synced") || status.contains("saved") { return .green }
+        if status.contains("waiting") || status.contains("authorization") { return .orange }
+        return Color(nsColor: .secondaryLabelColor)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            header
+            statusView
+            meetingsContent
+            Divider()
+            footer
+        }
+        .padding(16)
+        .frame(width: 340)
+    }
+
+    private var header: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "video.fill")
+                .font(.title3)
+                .foregroundStyle(.white)
+                .frame(width: 32, height: 32)
+                .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 8))
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Meeting Joiner").font(.headline)
+                Text("Calendar reminders").font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button { Task { await model.syncNow() } } label: {
+                Image(systemName: "arrow.clockwise")
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .help("Sync calendars")
+            .accessibilityLabel("Sync calendars")
+        }
+    }
+
+    private var statusView: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Image(systemName: statusIcon)
+                .foregroundStyle(statusTint)
+            Text(model.status)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    @ViewBuilder
+    private var meetingsContent: some View {
+        if upcomingMeetings.isEmpty {
+            emptyState
+        } else {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text("Upcoming").font(.headline)
+                    Spacer()
+                    Text(upcomingMeetings.count == 1 ? "1 meeting" : "\(upcomingMeetings.count) meetings")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 8) {
+                        ForEach(Array(upcomingMeetings.prefix(8))) { meeting in
+                            MeetingMenuRow(meeting: meeting,
+                                           onConnect: { model.connect(meeting) },
+                                           onSkip: { model.skip(meeting) })
+                        }
+                    }
+                }
+                .frame(maxHeight: 320)
+                if upcomingMeetings.count > 8 {
+                    Text("Showing the next 8 meetings.")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+        }
+    }
+
+    private var emptyState: some View {
+        VStack(spacing: 8) {
+            Image(systemName: "calendar.badge.clock")
+                .font(.system(size: 28))
+                .foregroundStyle(.secondary)
+            Text("No upcoming meetings")
+                .font(.headline)
+            Text("Connect Google Calendar or Exchange in Settings to see your schedule.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+            Button("Open Settings") { openSettings() }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 20)
+    }
+
+    private var footer: some View {
+        HStack {
+            Button { openSettings() } label: {
+                Label("Settings", systemImage: "gearshape")
+            }
+            .buttonStyle(.borderless)
+            .keyboardShortcut(",", modifiers: .command)
+            .help("Settings (⌘,)")
+            Spacer()
+            Button { NSApplication.shared.terminate(nil) } label: {
+                Label("Quit", systemImage: "power")
+            }
+            .buttonStyle(.borderless)
+            .keyboardShortcut("q", modifiers: .command)
+            .help("Quit (⌘Q)")
+        }
+    }
+
+    private func openSettings() {
+        NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+    }
+}
+
+private struct MeetingMenuRow: View {
+    let meeting: Meeting
+    let onConnect: () -> Void
+    let onSkip: () -> Void
+
+    private var isHappeningNow: Bool {
+        meeting.start <= .now && meeting.end > .now
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text("Meeting Joiner").font(.headline)
-                Spacer()
-                Button { Task { await model.syncNow() } } label: { Image(systemName: "arrow.clockwise") }
-                    .buttonStyle(.plain).help("Sync calendars")
-            }
-            Text(model.status).font(.caption).foregroundStyle(.secondary)
-            let current = model.meetings.filter { $0.end > .now }.prefix(8)
-            if current.isEmpty { Text("No upcoming meetings").foregroundStyle(.secondary) }
-            ForEach(Array(current)) { meeting in
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(meeting.title).fontWeight(.medium)
-                    Text(meeting.start.formatted(date: .omitted, time: .shortened)).font(.caption).foregroundStyle(.secondary)
-                    HStack {
-                        if meeting.conferenceURL != nil { Button("Connect") { model.connect(meeting) } }
-                        Button("Skip") { model.skip(meeting) }
-                    }.buttonStyle(.bordered)
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(meeting.title)
+                        .font(.callout)
+                        .fontWeight(.medium)
+                        .lineLimit(1)
+                    Label(meeting.start.formatted(date: .abbreviated, time: .shortened), systemImage: "clock")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
-                Divider()
+                Spacer()
+                if isHappeningNow {
+                    Text("Now")
+                        .font(.caption2)
+                        .fontWeight(.semibold)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.accentColor.opacity(0.15), in: Capsule())
+                } else if meeting.conferenceURL != nil {
+                    Image(systemName: "video.fill")
+                        .foregroundStyle(Color.accentColor)
+                        .accessibilityLabel("Has a conference link")
+                }
             }
-            Button("Settings…") {
-                NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+            HStack(spacing: 8) {
+                if meeting.conferenceURL != nil {
+                    Button("Connect", action: onConnect)
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                } else {
+                    Text("No conference link")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("Skip", action: onSkip)
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
             }
-            Button("Quit") { NSApplication.shared.terminate(nil) }
         }
-        .padding(12)
-        .frame(width: 320)
+        .padding(10)
+        .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
     }
 }
 
 private struct SettingsView: View {
     @ObservedObject var model: MeetingJoinerAppModel
+
     var body: some View {
         Form {
             Section("Google Calendar") {
-                Text("Sign in to let Meeting Joiner read your Google Calendar.")
-                    .font(.caption)
+                Text("Connect your Google account to import calendar events. Meeting Joiner requests read-only Calendar access.")
+                    .font(.callout)
                     .foregroundStyle(.secondary)
                 if model.isUsingLocalGoogleOAuthConfiguration {
-                    Text("Using the local Google Desktop OAuth client ID and secret. Credential values are not displayed.")
+                    Label("Using the local Google Desktop OAuth client", systemImage: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                    Text("Credential values are not displayed.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 } else if model.hasLocalGoogleOAuthConfiguration {
-                    Text("A local configuration was found. Clear the client ID override to use it; credential values are not displayed.")
+                    Label("Local OAuth client available", systemImage: "checkmark.circle")
+                        .foregroundStyle(.blue)
+                    Text("Clear the client ID override to use the local client_secret*.json file.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 } else {
-                    Text("No valid local Google Desktop OAuth configuration was found. Enter a client ID below or add a client_secret*.json file next to Package.swift.")
+                    Label("No local OAuth client configured", systemImage: "exclamationmark.triangle")
+                        .foregroundStyle(.orange)
+                    Text("Enter a client ID below or add a client_secret*.json file next to Package.swift.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-                SecureField("OAuth desktop client ID override (optional)", text: $model.googleClientID)
+                Button("Sign in with Google") { model.connectGoogle() }
+                    .buttonStyle(.borderedProminent)
                 TextField("Calendar ID", text: $model.googleCalendarID)
-                if model.isUsingLocalGoogleOAuthConfiguration {
-                    Text("The client secret is supplied by the local file and remains hidden.")
+                DisclosureGroup("Advanced OAuth client overrides") {
+                    TextField("OAuth client ID override (optional)", text: $model.googleClientID)
+                    SecureField("OAuth client secret override (optional)", text: $model.googleClientSecretDraft)
+                    Text("Overrides replace the local client file. The secret is stored in Keychain when you save.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                } else {
-                    SecureField("OAuth client secret override (optional)", text: $model.googleClientSecretDraft)
                 }
-                Button("Войти через Google") { model.connectGoogle() }
+                .font(.callout)
             }
             Section("On-prem Exchange (EWS)") {
+                Text("Connect to Exchange Web Services for on-prem calendars. Basic auth requires HTTPS; no-TLS mode is unauthenticated.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
                 TextField("Server URL", text: $model.settings.serverURL, prompt: Text("https://exchange.example.org"))
                 TextField("Port", value: $model.settings.port, format: .number)
                 TextField("Domain", text: $model.settings.domain)
@@ -361,27 +538,50 @@ private struct SettingsView: View {
                     ForEach(ExchangeTLSMode.allCases, id: \.self) { Text($0.displayName).tag($0) }
                 }
                 if model.settings.tlsMode == .customCA {
+                    Text("Imports a CA certificate into Keychain and trusts it in addition to system CAs.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                     Button("Import CA certificate to Keychain…") { model.importCA() }
                 }
                 Button("Import optional client certificate…") { model.importClientCertificate() }
+                Text("Optional mutual-TLS identity for Exchange; the PKCS#12 passphrase is used only during import.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 if let warning = model.settings.securityWarning {
-                    Text(warning).foregroundStyle(.red).font(.callout)
+                    Label(warning, systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                        .font(.callout)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 HStack {
                     Text("Sync interval")
                     TextField("Minutes", value: $model.settings.syncIntervalMinutes, format: .number).frame(width: 80)
                     Text("minutes (1–1440)")
+                        .foregroundStyle(.secondary)
                 }
             }
             Section {
-                HStack {
-                    Button("Save Settings") { model.saveSettings() }
-                    Button("Sync Now") { Task { await model.syncNow() } }
-                    Text(model.status).font(.caption).foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 12) {
+                        Button("Save Settings") { model.saveSettings() }
+                            .buttonStyle(.borderedProminent)
+                            .keyboardShortcut("s", modifiers: .command)
+                        Button("Sync Now") { Task { await model.syncNow() } }
+                            .keyboardShortcut("r", modifiers: .command)
+                        Spacer()
+                        Text("⌘S save · ⌘R sync")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
+                    Text(model.status)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
         }
         .padding(20)
-        .frame(width: 520, height: 660)
+        .frame(width: 560, height: 700)
     }
 }
