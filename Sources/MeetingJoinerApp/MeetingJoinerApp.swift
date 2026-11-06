@@ -291,6 +291,10 @@ private struct MenuContentView: View {
         model.meetings.filter { $0.end > .now }
     }
 
+    private var visibleMeetings: [Meeting] {
+        Array(upcomingMeetings.prefix(8))
+    }
+
     private var statusIcon: String {
         let status = model.status.lowercased()
         if status.contains("fail") || status.contains("error") { return "exclamationmark.triangle.fill" }
@@ -366,22 +370,37 @@ private struct MenuContentView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 8) {
-                        ForEach(Array(upcomingMeetings.prefix(8))) { meeting in
-                            MeetingMenuRow(meeting: meeting,
-                                           onConnect: { model.connect(meeting) },
-                                           onSkip: { model.skip(meeting) })
-                        }
-                    }
-                }
-                .frame(maxHeight: 320)
+                meetingList
                 if upcomingMeetings.count > 8 {
                     Text("Showing the next 8 meetings.")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
                 }
             }
+        }
+    }
+
+    @ViewBuilder
+    private var meetingList: some View {
+        if upcomingMeetings.count <= 4 {
+            LazyVStack(alignment: .leading, spacing: 8) {
+                ForEach(visibleMeetings) { meeting in
+                    MeetingMenuRow(meeting: meeting,
+                                   onConnect: { model.connect(meeting) },
+                                   onSkip: { model.skip(meeting) })
+                }
+            }
+        } else {
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 8) {
+                    ForEach(visibleMeetings) { meeting in
+                        MeetingMenuRow(meeting: meeting,
+                                       onConnect: { model.connect(meeting) },
+                                       onSkip: { model.skip(meeting) })
+                    }
+                }
+            }
+            .frame(maxHeight: 320)
         }
     }
 
